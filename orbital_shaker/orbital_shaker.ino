@@ -80,7 +80,7 @@
  * I only added a method to check if a pin is enabled or not
  */
 #include "MatrixKey.h"
-#include <MsTimer2.h> // to use the library: it updates the status periodically
+#include <MsTimer2.h> // to use the MatrixKey library: it updates the status periodically
 
 /*
  * Library developed by *me* :)
@@ -236,35 +236,44 @@ void loop() {
   }
 
   // do action regarding function ID "fid"
-  if ((fid != 0) && (key == KeyEnter) && (!layerChanged)) {
+
+  if ((fid != 0) && (KeyEnter == key) && (!layerChanged)) {
     switch (fid) {
+      
       case MainBack:
       case SettingsBack:
-      
-        // go back
-        menu.exit();
 
-        // update the menu
-        menu.getInfo(info);
-        printMenuEntry(info);
-
+        back(info);
         break;
+
       case SettingsSpeed:
-        settingsSpeed();
+
+        /*
+         * we are now stuck in another cycle until enter is pressed again
+         */
+        settingsSpeed (info);
         break;
+
       case SettingsTime:
-        settingsTime();
+
+        settingsTime (info);
         break;
+
       case SettingsDir:
-        settingsDir();
+
+        settingsDir (info);
         break;
+
       case MainInfo:
-        mainInfo();
+
+        mainInfo (info);
         break;
+
       default:
         break;
     }
   }
+  
 }
 
 /*
@@ -308,24 +317,123 @@ KeyType getKey() {
 
 /* -------------------------------- functions ------------------------------- */
 
-void mainInfo() {
-  // lcd.setCursor(0, 0);
-  // lcd.print(">:(");
+void back (const char*& info) {
+  
+  // if the action is "back", then go back duh wtf
+  menu.exit();
+  
+  // update the menu
+  menu.getInfo(info);
+  printMenuEntry(info);
+}
+
+void mainInfo(const char*& info) {
+
+  printLines("Info", ">:( go away");
+
+}
+
+/*
+ * TODO: store this variable
+ */
+int current_speed = 50;
+const int speed_delta = 10;
+void settingsSpeed(const char*& info) {
+
+  printLines("Select speed:", current_speed);
+
+  // determine pressed key
+  KeyType key;
+
+  while ((key = getKey()) != KeyEnter) {
+
+    if (key == KeyLeft && current_speed > speed_delta) {
+      current_speed -= speed_delta;
+      printLines("Select speed:", current_speed);
+    } else if (key == KeyRight && current_speed <= 100 - speed_delta) {
+      current_speed += speed_delta;
+      printLines("Select speed:", current_speed);
+    }
+  }
+
+  back(info); // go back and update the menu
+}
+
+/*
+ * set the spinning time (minutes); 
+ * min = 1 minute
+ * max = 60 minutes
+ * 
+ * TODO: store this variable
+ */
+int time_m = 5;
+int time_delta = 1;
+int min_time = 1;
+int max_time = 60;
+void settingsTime(const char*& info) {
+
+  printLines("Select time (m):", time_m);
+
+  // determine pressed key
+  KeyType key;
+
+  while ((key = getKey()) != KeyEnter) {
+
+    if (key == KeyLeft && time_m - time_delta >= min_time ) {
+      time_m-= time_delta;
+      printLines("Select time (m):", time_m);
+    } else if (key == KeyRight && time_m + time_delta <= max_time) {
+      time_m += time_delta;
+      printLines("Select time (m):", time_m);
+    }
+  }
+
+  back(info); // go back and update the menu
+}
+
+/*
+ * change spinning direction in the middle of the job;
+ * TODO we could add another setting to change direction
+ * periodically every n seconds
+ */
+bool changeDir = false;
+void settingsDir(const char*& info) {
+
+  printLines("Change direction", "mid job? NO");
+
+  // determine pressed key
+  KeyType key;
+
+  while ((key = getKey()) != KeyEnter) {
+    if (key == KeyLeft && changeDir == false) {
+      changeDir = true;
+      printLines("Change direction", "mid job? YES");
+    } else if (key == KeyRight && changeDir == true) {
+      changeDir = false;
+      printLines("Change direction", "mid job? NO");
+    }
+  }
+
+  back(info); // go back and update the menu
+}
+
+/*
+ * clears the lcd and prints the strings, one on each line
+ */
+void printLines (String str1, String str2) {
+  
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(str1);
   lcd.setCursor(0, 1);
-  lcd.print(">:( go away");
+  lcd.print(str2);  
 }
 
-void settingsSpeed() {
-  lcd.setCursor(0,1);
-  lcd.print("select speed");
-}
+void printLines (String str, int value) {
 
-void settingsTime() {
-  lcd.setCursor(0,1);
-  lcd.print("select time");
-}
-
-void settingsDir() {
-  lcd.setCursor(0,1);
-  lcd.print("change direction?");
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(str);
+  lcd.setCursor(0, 1);
+  lcd.print(value);
 }
