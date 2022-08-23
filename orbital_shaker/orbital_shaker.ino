@@ -99,7 +99,7 @@ LiquidCrystal lcd(LCD_RS, LCD_E, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 // number of confirmations of the status of contacts = 6
 MatrixKeys keys (PIN_CTRL, 255, 255, 255, BTN_ENTER, BTN_LEFT, BTN_RIGHT, 255, 6);
 
-DRV8833 motor_driver(DRV8833_IN1, DRV8833_IN2);
+DRV8833 motor_driver (DRV8833_IN1, DRV8833_IN2);
 
 /* ---------------------------------- menu ---------------------------------- */
 
@@ -174,6 +174,10 @@ void setup_keypad (void) {
   MsTimer2::start(); // enable timer interrupt  
 }
 
+void setup_motor_driver (void) {
+  motor_driver.hardware_setup(); // All done inside the library, poor design choices YOLOOOO
+}
+
 void timerInterrupt() {
   keys.scanState(); // scan matrix
 }
@@ -233,6 +237,7 @@ void setup() {
   // setup all the stuff
   setup_lcd();
   setup_keypad();
+  setup_motor_driver();
 
   // add nodes to menu (layer, string, function ID)
   menu.addNode(0, main_menu_str , MainMenu);
@@ -502,6 +507,11 @@ void settingsSpeed(const char*& info) {
   Serial.print("Speed set to ");
   Serial.print(current_speed);
   Serial.println(" %");
+
+  /*
+   * at low speed the plate can't move
+   */
+  current_speed = map(current_speed, min_speed, max_speed, 40, 100);
   
   back(info); // go back and update the menu
 }

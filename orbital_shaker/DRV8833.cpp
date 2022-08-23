@@ -13,20 +13,17 @@ DRV8833::DRV8833 (int IN_1, int IN_2):
  * 1   pwm   forward, slow decay
  * pwm   0   forward, fast decay
  */
-void DRV8833::forward (int speed_percent) {
+void DRV8833::forward (float speed_percent) {
 
   _input_speed = speed_percent;
-  _normalized_speed = normalize_speed(speed_percent);
+  _pwm = get_pwm(speed_percent);
   _direction = Direction::FORWARD;
-
-  Serial.print("Normalized speed: ");
-  Serial.println(_normalized_speed);
 
   if (this -> _decay_mode == Decay::SLOW_DECAY) {
     digitalWrite(_IN_1, HIGH);
-    Timer1.pwm(_IN_2, _normalized_speed);
+    Timer1.pwm(_IN_2, _pwm);
   } else {
-    Timer1.pwm(_IN_1, _normalized_speed);
+    Timer1.pwm(_IN_1, _pwm);
     digitalWrite(_IN_2, LOW);
   }
 }
@@ -36,21 +33,18 @@ void DRV8833::forward (int speed_percent) {
  * pwm   1   backward, slow decay
  * 0   pwm   backward, fast decay
  */
-void DRV8833::backward (int speed_percent) {
+void DRV8833::backward (float speed_percent) {
 
   _input_speed = speed_percent;
-  _normalized_speed = normalize_speed(speed_percent);
+  _pwm = get_pwm(speed_percent);
   _direction = Direction::BACKWARD;
 
-  Serial.print("Normalized speed: ");
-  Serial.println(_normalized_speed);
-
   if (this -> _decay_mode == Decay::SLOW_DECAY) {
-    Timer1.pwm(_IN_1, _normalized_speed);
+    Timer1.pwm(_IN_1, _pwm);
     digitalWrite(_IN_2, HIGH);
   } else {
     digitalWrite(_IN_2, LOW);
-    Timer1.pwm(_IN_2, _normalized_speed);
+    Timer1.pwm(_IN_2, _pwm);
   }
 }
 
@@ -68,7 +62,7 @@ void DRV8833::set_fast_decay () {
   _decay_mode = Decay::FAST_DECAY;
 }
 
-void DRV8833::set_speed (int new_speed) {
+void DRV8833::set_speed (float new_speed) {
   if (_direction == Direction::BACKWARD)
     backward(new_speed);
   else
@@ -94,32 +88,31 @@ void DRV8833::hardware_setup () {
   pinMode(_IN_1, OUTPUT);
   pinMode(_IN_2, OUTPUT);
 
-  Timer1.initialize(500000);
+  Timer1.initialize(40);
 
 }
 
-int DRV8833::normalize_speed (int input_speed) {
+int DRV8833::get_pwm (float speed_percent) {
 
   /* 
    * speed = 0 used to stop the motors
    * but a speed value between 0 and the threshold should be ignored
    */
-  if (input_speed == 0)
+  if (speed_percent == 0.0)
     return 0;
-  
+
   /*
    * clamp the value in range (threshold, 100)
    */
-  if (input_speed > 100)
-    input_speed = 100;
+  if (speed_percent > 100.0)
+    speed_percent = 100.0;
 
-  if (input_speed < _speed_threshold)
-    input_speed = _speed_threshold;
+  if (speed_percent < _speed_threshold)
+    speed_percent = _speed_threshold;
 
-  /*
-   * now we have a value between 10 and 100;
-   * this kind of motor seems to move if the duty cycle is between 70% and 100%
-   */
+  // speed : 100 = x : 1024
+  // x = (speed * 1024) / 100;
+  float new_speed = 100.0 - speed_percent;
 
-  return map(input_speed, _speed_threshold, 100, 70, 100); // (threshold, 100) speed percentage
+  return (new_speed * 1023) / 100;
 }

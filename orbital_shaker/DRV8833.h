@@ -18,7 +18,7 @@ class DRV8833 {
      * pwm   0   forward, fast decay
      * 
      */
-    void forward (int speed);
+    void forward (float speed_percent);
 
     /**
     * @brief Move the motor backward at a certain speed (at least it tries to).
@@ -29,12 +29,12 @@ class DRV8833 {
     *
     * @param speed_percent (threshold, 100)
     */
-    void backward (int speed);
+    void backward (float speed_percent);
 
     /**
      * @brief Change the motor speed keeping the same direction
      */
-    void set_speed (int new_speed_percent);
+    void set_speed (float new_speed_percent);
 
     /**
     * @brief Stop the motor
@@ -83,8 +83,8 @@ class DRV8833 {
     
     Decay _decay_mode = Decay::SLOW_DECAY;
     Direction _direction = Direction::FORWARD;
-    int _input_speed = 0; // store the value asked by the user
-    int _normalized_speed = 0;
+    float _input_speed = 0.0; // store the value asked by the user
+    int _pwm = 0;
 
     /*
      * Valid range -> (10, 100)
@@ -95,9 +95,8 @@ class DRV8833 {
     * @brief Normalizes the input speed in range (0, 100) to fit the motors need
     * 
     * @param speed input in range (0, 100)
-    * @return normalized speed (0, 100) -> (100, 80);
     */
-    int normalize_speed (int speed);
+    int get_pwm (float speed_percent);
 
 };
 
