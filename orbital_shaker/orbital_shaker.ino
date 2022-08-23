@@ -205,7 +205,7 @@ long job_percent = 0;
 Simpletimer lcdUpdateTimer; // timer to update the percentage on the lcd
 
 // job duration
-int time_m = 1;
+int time_m = 10; // standard job duration
 int time_delta = 1;
 int min_time = 1;
 int max_time = 60;
