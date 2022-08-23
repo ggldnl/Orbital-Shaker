@@ -64,13 +64,16 @@
  * DRV8833_IN1 -> D3
  * DRV8833_IN2 -> D11
  */
-#define DRV8833_IN1 9
-#define DRV8833_IN2 10
+#define DRV8833_IN1 10
+#define DRV8833_IN2 9
 
 /* -------------------------------- libraries ------------------------------- */
 
 #include <LiquidCrystal.h> // for the LCD
 #include "CMBMenu.hpp"
+
+// timer to handle the routine, explained later in mainStart(...) function
+#include <Simpletimer.h>
 
 /*
  * Library developed by Kalinin Edward
@@ -121,6 +124,8 @@ const char main_start_str[] PROGMEM = {"Start"};
 const char settings_speed_str[] PROGMEM = {"Speed"};
 const char settings_time_str[] PROGMEM = {"Time"};
 const char settings_direction_str[] PROGMEM = {"Direction"};
+const char settings_dir_interval_str[] PROGMEM = {"Change dir int."};
+const char settings_soft_start_str[] PROGMEM = {"Soft start"};
 const char main_info_str[] PROGMEM = {"Info"};
 const char back_str[] PROGMEM = {"Back"};
 
@@ -134,7 +139,9 @@ enum MenuFID {
   SettingsBack,
   SettingsSpeed,
   SettingsTime,
-  SettingsDir
+  SettingsDir,
+  SettingsDirInterval,
+  SettingsSoftStart
 };
 
 // define key types
@@ -171,6 +178,53 @@ void timerInterrupt() {
   keys.scanState(); // scan matrix
 }
 
+/* -------------------------------- variables ------------------------------- */
+
+/*
+ * Timer0 is used for micros(), millis(), delay(), etc and can't be used
+ * Timer1 is used to generate hardware pwm for the DRV8833 board
+ * Timer2 is used for the keypad
+ * 
+ * since the timing doesn't have to be precise for the routine (the error is in the order of ms,
+ * while once the job starts it can last several minutes) we can simply use millis() and so on
+ * in the main loop to check if the job needs to be terminated or not.
+ * The library SimpleTimer internally uses millis() and micros()
+ */
+bool job_running = false;
+long running_time = 0;
+Simpletimer jobTimer; // timer to handle the whole procedure
+
+const int update_interval = 1000; // 1000 ms
+long starting_time = 0;
+long elapsed_time = 0;
+long job_percent = 0;
+Simpletimer lcdUpdateTimer; // timer to update the percentage on the lcd
+
+// job duration
+int time_m = 1;
+int time_delta = 1;
+int min_time = 1;
+int max_time = 60;
+
+// speed
+int current_speed = 50;
+const int speed_delta = 10;
+int min_speed = 10;
+int max_speed = 100;
+
+// soft start
+Simpletimer softStartTimer; // timer to increase speed for a soft start
+bool soft_start = true;
+int soft_start_speed = 10;
+int soft_start_delta = 5;
+
+// change direction
+Simpletimer changeDirTimer; // timer to periodically change direction
+bool change_dir = true;
+int min_dir_interval = 1; // 1 minute
+int change_dir_delta = 1;
+long change_dir_interval = min_dir_interval;
+
 void setup() {
   
   // open the serial line
@@ -186,7 +240,9 @@ void setup() {
   menu.addNode(1, main_settings_str, MainSettings);
   menu.addNode(2, settings_time_str, SettingsTime);
   menu.addNode(2, settings_speed_str, SettingsSpeed);
-  menu.addNode(2, settings_direction_str, SettingsDir);  
+  menu.addNode(2, settings_direction_str, SettingsDir);
+  menu.addNode(2, settings_dir_interval_str, SettingsDirInterval);
+  menu.addNode(2, settings_soft_start_str, SettingsSoftStart);
   menu.addNode(2, back_str, SettingsBack);
   menu.addNode(1, back_str, MainBack);
   menu.addNode(1, main_info_str, MainInfo);
@@ -196,7 +252,7 @@ void setup() {
   menu.buildMenu(info);
 
   // print current menu entry
-   printMenuEntry(info);
+  printMenuEntry(info);
 }
 
 void loop() {
@@ -246,6 +302,10 @@ void loop() {
         back(info);
         break;
 
+      case MainStart:
+        mainStart(info);
+        break;
+
       case SettingsSpeed:
 
         /*
@@ -264,6 +324,16 @@ void loop() {
         settingsDir (info);
         break;
 
+      case SettingsSoftStart:
+
+        settingsSoftStart(info);
+        break;
+
+      case SettingsDirInterval:
+
+        settingsDirInterval(info);
+        break;
+
       case MainInfo:
 
         mainInfo (info);
@@ -273,8 +343,62 @@ void loop() {
         break;
     }
   }
-  
+
+  if (job_running && jobTimer.timer(running_time)){
+    callback();
+    job_running = false;
+    printLines("Job done", "100 %");
+    keys.enable();
+    
+    Serial.print("Job ended after ");
+    Serial.print(running_time / 1000);
+    Serial.println(" milliseconds");
+  }
+
+  /*
+   * soft start starts from min speed and increases it until reaching
+   * user input speed
+   */
+  if (job_running && soft_start && softStartTimer.timer(1000)) {
+    if (soft_start_speed + soft_start_delta <= current_speed) {
+      soft_start_speed += soft_start_delta;
+      motor_driver.set_speed(soft_start_speed);
+
+      Serial.print("Speed increased: ");
+      Serial.print(soft_start_speed);
+      Serial.print(" -> ");
+      Serial.print(current_speed);
+      Serial.println();
+    }
+  }
+
+  if (job_running && lcdUpdateTimer.timer(update_interval)) {
+    // percent : 100 = elapsed : total
+    // percent = (elapsed * 100) / total
+    // total = running_time
+    elapsed_time = millis() - starting_time;
+    job_percent = (elapsed_time * 100) / running_time;
+    printLines("Job running...", String(job_percent) + " %");
+
+    Serial.print("Elapsed time: ");
+    Serial.print(elapsed_time);
+    Serial.println(" ms");
+
+    //Serial.print("Current job percent: ");
+    //Serial.print(job_percent);
+    //Serial.println(" %");
+  }
+
+  if (job_running && change_dir && changeDirTimer.timer(change_dir_interval * 60 * 1000)) {
+    motor_driver.halt();
+    delay(500); // so the motor doesn't complain
+    motor_driver.invert_direction();
+
+    Serial.println("Swapping direction");
+  }
 }
+
+/* ---------------------------- utility functions --------------------------- */
 
 /*
  * prints the menu entry on the LCD display
@@ -315,108 +439,6 @@ KeyType getKey() {
  return key;
 }
 
-/* -------------------------------- functions ------------------------------- */
-
-void back (const char*& info) {
-  
-  // if the action is "back", then go back duh wtf
-  menu.exit();
-  
-  // update the menu
-  menu.getInfo(info);
-  printMenuEntry(info);
-}
-
-void mainInfo(const char*& info) {
-
-  printLines("Info", ">:( go away");
-
-}
-
-/*
- * TODO: store this variable
- */
-int current_speed = 50;
-const int speed_delta = 10;
-void settingsSpeed(const char*& info) {
-
-  printLines("Select speed:", current_speed);
-
-  // determine pressed key
-  KeyType key;
-
-  while ((key = getKey()) != KeyEnter) {
-
-    if (key == KeyLeft && current_speed > speed_delta) {
-      current_speed -= speed_delta;
-      printLines("Select speed:", current_speed);
-    } else if (key == KeyRight && current_speed <= 100 - speed_delta) {
-      current_speed += speed_delta;
-      printLines("Select speed:", current_speed);
-    }
-  }
-
-  back(info); // go back and update the menu
-}
-
-/*
- * set the spinning time (minutes); 
- * min = 1 minute
- * max = 60 minutes
- * 
- * TODO: store this variable
- */
-int time_m = 5;
-int time_delta = 1;
-int min_time = 1;
-int max_time = 60;
-void settingsTime(const char*& info) {
-
-  printLines("Select time (m):", time_m);
-
-  // determine pressed key
-  KeyType key;
-
-  while ((key = getKey()) != KeyEnter) {
-
-    if (key == KeyLeft && time_m - time_delta >= min_time ) {
-      time_m-= time_delta;
-      printLines("Select time (m):", time_m);
-    } else if (key == KeyRight && time_m + time_delta <= max_time) {
-      time_m += time_delta;
-      printLines("Select time (m):", time_m);
-    }
-  }
-
-  back(info); // go back and update the menu
-}
-
-/*
- * change spinning direction in the middle of the job;
- * TODO we could add another setting to change direction
- * periodically every n seconds
- */
-bool changeDir = false;
-void settingsDir(const char*& info) {
-
-  printLines("Change direction", "mid job? NO");
-
-  // determine pressed key
-  KeyType key;
-
-  while ((key = getKey()) != KeyEnter) {
-    if (key == KeyLeft && changeDir == false) {
-      changeDir = true;
-      printLines("Change direction", "mid job? YES");
-    } else if (key == KeyRight && changeDir == true) {
-      changeDir = false;
-      printLines("Change direction", "mid job? NO");
-    }
-  }
-
-  back(info); // go back and update the menu
-}
-
 /*
  * clears the lcd and prints the strings, one on each line
  */
@@ -436,4 +458,185 @@ void printLines (String str, int value) {
   lcd.print(str);
   lcd.setCursor(0, 1);
   lcd.print(value);
+}
+
+/* ----------------------------- menu functions ----------------------------- */
+
+void back (const char*& info) {
+  
+  // if the action is "back", then go back duh wtf
+  menu.exit();
+  
+  // update the menu
+  menu.getInfo(info);
+  printMenuEntry(info);
+}
+
+void mainInfo(const char*& info) {
+
+  printLines("Info", ">:( go away");
+
+}
+
+/*
+ * TODO: store the speed
+ */
+void settingsSpeed(const char*& info) {
+
+  printLines("Select speed:", current_speed);
+
+  // determine pressed key
+  KeyType key;
+
+  while ((key = getKey()) != KeyEnter) {
+
+    if (key == KeyLeft && current_speed - speed_delta >= min_speed) {
+      current_speed -= speed_delta;
+      printLines("Select speed:", current_speed);
+    } else if (key == KeyRight && current_speed + speed_delta <= max_speed) {
+      current_speed += speed_delta;
+      printLines("Select speed:", current_speed);
+    }
+  }
+
+  Serial.print("Speed set to ");
+  Serial.print(current_speed);
+  Serial.println(" %");
+  
+  back(info); // go back and update the menu
+}
+
+/*
+ * set the spinning time (minutes); 
+ * min = 1 minute
+ * max = 60 minutes
+ * 
+ * TODO: store the duration
+ */
+void settingsTime(const char*& info) {
+
+  printLines("Select time (m):", time_m);
+
+  // determine pressed key
+  KeyType key;
+
+  while ((key = getKey()) != KeyEnter) {
+
+    if (key == KeyLeft && time_m - time_delta >= min_time ) {
+      time_m-= time_delta;
+      printLines("Select time (m):", time_m);
+    } else if (key == KeyRight && time_m + time_delta <= max_time) {
+      time_m += time_delta;
+      printLines("Select time (m):", time_m);
+    }
+  }
+
+  Serial.print("Time set to ");
+  Serial.print(time_m);
+  Serial.println(" minute(s)");
+
+  back(info); // go back and update the menu
+}
+
+/*
+ * change spinning direction each n seconds (default every minute)
+ * 
+ */
+void settingsDir(const char*& info) {
+
+  printLines("Change dir?", change_dir ? "YES" : "NO");
+
+  // determine pressed key
+  KeyType key;
+
+  while ((key = getKey()) != KeyEnter) {
+    if (key == KeyLeft && change_dir == false) {
+      change_dir = true;
+      printLines("Change dir?", "YES");
+    } else if (key == KeyRight && change_dir == true) {
+      change_dir = false;
+      printLines("Change dir?", "NO");
+    }
+  }
+
+  Serial.print("Change dir?");
+  Serial.println(change_dir ? "YES" : "NO");
+
+  back(info); // go back and update the menu
+}
+
+/*
+ * change direction periodically every n minutes/seconds
+ */
+void settingsDirInterval(const char*& info) {
+
+  printLines("Select interval (m):", change_dir_interval);
+
+  // determine pressed key
+  KeyType key;
+
+  while ((key = getKey()) != KeyEnter) {
+
+    if (key == KeyLeft && change_dir_interval - change_dir_delta >= min_dir_interval ) {
+      change_dir_interval -= change_dir_delta;
+      printLines("Select interval (m):", change_dir_interval);
+    } else if (key == KeyRight && change_dir_interval + change_dir_delta <= time_m) {
+      change_dir_interval += change_dir_delta;
+      printLines("Select time (m):", change_dir_interval);
+    }
+  }
+
+  Serial.print("Swapping time set to ");
+  Serial.print(change_dir_interval);
+  Serial.println(" minute(s)");
+
+  back(info); // go back and update the menu
+}
+
+/*
+ * starts with low speed and slowly increase it
+ */
+void settingsSoftStart(const char*& info) {
+
+  printLines("Soft start?", soft_start ? "YES" : "NO");
+
+  // determine pressed key
+  KeyType key;
+
+  while ((key = getKey()) != KeyEnter) {
+    if (key == KeyLeft && soft_start == false) {
+      soft_start = true;
+      printLines("Soft start", "YES");
+    } else if (key == KeyRight && soft_start == true) {
+      soft_start = false;
+      printLines("Soft start", "NO");
+    }
+  }
+
+  Serial.print("Soft start?");
+  Serial.println(soft_start ? "YES" : "NO");
+
+  back(info); // go back and update the menu
+}
+
+void callback(){
+  motor_driver.halt();
+}
+
+void mainStart (const char*& info) {
+
+  job_running = true;
+  running_time = 60 * (long)time_m * 1000; // ms
+  starting_time = millis();
+
+  keys.disable();
+
+  if (soft_start)
+    motor_driver.forward(current_speed);
+  else
+    motor_driver.forward(min_speed);
+  
+  Serial.print("Starting job (");
+  Serial.print(running_time);
+  Serial.println(") ms");
 }

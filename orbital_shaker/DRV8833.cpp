@@ -1,5 +1,5 @@
 #include "DRV8833.h"
-// #include <TimerOne.h> // PWM generation
+#include <TimerOne.h> // PWM generation
 #include "Arduino.h"
 
 DRV8833::DRV8833 (int IN_1, int IN_2, int EEP):
@@ -8,38 +8,56 @@ DRV8833::DRV8833 (int IN_1, int IN_2, int EEP):
 DRV8833::DRV8833 (int IN_1, int IN_2):
   _IN_1(IN_1), _IN_2(IN_2), _EEP(255) {}
 
+/*
+ * forward:
+ * 1   pwm   forward, slow decay
+ * pwm   0   forward, fast decay
+ */
 void DRV8833::forward (int speed_percent) {
-  
-  int normalized_speed = normalize_speed(speed_percent);
+
+  _input_speed = speed_percent;
+  _normalized_speed = normalize_speed(speed_percent);
   _direction = Direction::FORWARD;
 
+  Serial.print("Normalized speed: ");
+  Serial.println(_normalized_speed);
+
   if (this -> _decay_mode == Decay::SLOW_DECAY) {
-    //Timer1.pwm(IN_1, 100);
-    //Timer1.pwm(IN_2, normalized_speed);
+    digitalWrite(_IN_1, HIGH);
+    Timer1.pwm(_IN_2, _normalized_speed);
   } else {
-    //Timer1.pwm(IN_1, normalized_speed);
-    //Timer1.pwm(IN_2, 0);
+    Timer1.pwm(_IN_1, _normalized_speed);
+    digitalWrite(_IN_2, LOW);
   }
 }
 
+/*
+ * bacward:
+ * pwm   1   backward, slow decay
+ * 0   pwm   backward, fast decay
+ */
 void DRV8833::backward (int speed_percent) {
-  
-  int normalized_speed = normalize_speed(speed_percent);
+
+  _input_speed = speed_percent;
+  _normalized_speed = normalize_speed(speed_percent);
   _direction = Direction::BACKWARD;
 
-    if (this -> _decay_mode == Decay::SLOW_DECAY) {
-      //Timer1.pwm(IN_1, normalized_speed);
-      //Timer1.pwm(IN_2, 100);
-    } else {
-      //Timer1.pwm(IN_1, 0);
-      //Timer1.pwm(IN_2, normalized_speed);
-    }
+  Serial.print("Normalized speed: ");
+  Serial.println(_normalized_speed);
+
+  if (this -> _decay_mode == Decay::SLOW_DECAY) {
+    Timer1.pwm(_IN_1, _normalized_speed);
+    digitalWrite(_IN_2, HIGH);
+  } else {
+    digitalWrite(_IN_2, LOW);
+    Timer1.pwm(_IN_2, _normalized_speed);
+  }
 }
 
 void DRV8833::halt () {
-  
-  //Timer1.pwm(IN_1, 0);
-  //Timer1.pwm(IN_2, 0);
+
+  Timer1.pwm(_IN_1, 0);
+  Timer1.pwm(_IN_2, 0);
 }
 
 void DRV8833::set_slow_decay () {
@@ -57,6 +75,14 @@ void DRV8833::set_speed (int new_speed) {
     forward(new_speed);
 }
 
+void DRV8833::invert_direction () {
+  if (_input_speed != 0)
+    if (_direction == Direction::BACKWARD)
+      forward(_input_speed);
+    else
+      backward(_input_speed);
+}
+
 void DRV8833::hardware_setup () {
 
   // enable the board
@@ -64,13 +90,22 @@ void DRV8833::hardware_setup () {
     pinMode(_EEP, OUTPUT);
     digitalWrite (_EEP, HIGH); 
   }
-  
-  //softPwmCreate(IN_1, 0, 100);
-  //softPwmCreate(IN_2, 0, 100);
+
+  pinMode(_IN_1, OUTPUT);
+  pinMode(_IN_2, OUTPUT);
+
+  Timer1.initialize(500000);
 
 }
 
 int DRV8833::normalize_speed (int input_speed) {
+
+  /* 
+   * speed = 0 used to stop the motors
+   * but a speed value between 0 and the threshold should be ignored
+   */
+  if (input_speed == 0)
+    return 0;
   
   /*
    * clamp the value in range (threshold, 100)
@@ -78,24 +113,13 @@ int DRV8833::normalize_speed (int input_speed) {
   if (input_speed > 100)
     input_speed = 100;
 
-  if (input_speed < 0)
+  if (input_speed < _speed_threshold)
     input_speed = _speed_threshold;
 
-  /* 
-   * speed = 0 used to stop the motors
-   * but a speed value between 0 and the threshold should be ignored
-   */
-  if (input_speed == 0)
-    return 100;
-
   /*
-   * If we set a pwm value of 70 it means that the signal will be high for 70% of the time 
-   * and low for the remaining 30. I don't know why but this behaviour results in a 30% speed
-   * in our case (with the drv8833).
-   * To avoid this, we invert the speed argument: speed -> 100 - speed. In addition to this 
-   * the initial value should be an integer between 0 and 100, at least theoretically: from the 
-   * observations we get that with a 10% speed the wheel doesn't even move. We can set the limits 
-   * between 20 and 100 (operative limit).
+   * now we have a value between 10 and 100;
+   * this kind of motor seems to move if the duty cycle is between 70% and 100%
    */
-  return 100 - input_speed; // (threshold, 100) speed percentage
+
+  return map(input_speed, _speed_threshold, 100, 70, 100); // (threshold, 100) speed percentage
 }

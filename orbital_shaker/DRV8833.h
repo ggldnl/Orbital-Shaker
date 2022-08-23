@@ -42,6 +42,11 @@ class DRV8833 {
     void halt (void);
 
     /**
+     * @brief invert spinning direction
+     */
+     void invert_direction (void);
+
+    /**
     * @brief Setup the hardware (pins as output, pwm creation and so on)
     */
     void hardware_setup (void);
@@ -78,11 +83,13 @@ class DRV8833 {
     
     Decay _decay_mode = Decay::SLOW_DECAY;
     Direction _direction = Direction::FORWARD;
+    int _input_speed = 0; // store the value asked by the user
+    int _normalized_speed = 0;
 
     /*
-     * assert threshold is more than 20 at least -> min speed value accepted
+     * Valid range -> (10, 100)
      */
-    static const int _speed_threshold = 20;
+    static const int _speed_threshold = 10;
   
     /**
     * @brief Normalizes the input speed in range (0, 100) to fit the motors need

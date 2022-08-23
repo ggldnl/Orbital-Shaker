@@ -40,8 +40,14 @@ class MatrixKeys  {
     bool flagClick[4][4]; // signs - the button was pressed (click)
     void  scanState();    // button state check method
 
-    // returns true if the button is enabled (!= 255)
-    bool isEnabled(int row, int col);
+    // returns true if the button exists (!= 255)
+    bool isValid(int row, int col);
+
+    // disables the keypad
+    void disable (void);
+
+    // enables the keypad
+    void enable (void);
     
     // constructor
     MatrixKeys(byte verticalPin1, byte verticalPin2, byte verticalPin3, byte verticalPin4, 
@@ -54,6 +60,7 @@ class MatrixKeys  {
     byte _numAckn;          // number of confirmations of the state of the buttons
     byte  _scanVertLine;    // number of the scanned vertical line
     byte  _scanHorizLine;    // number of scanned horizontal line
+    bool _enabled;
 } ;
 
 #endif
