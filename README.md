@@ -1,4 +1,4 @@
-# orbital_shaker
+# Orbital Shaker
 
 I needed something to help me out shaking the ferric chloride, sodium carbonate and acetone trays when making PCBs. You can check out [my guide](https://github.com/ggldnl/pcb_manufacturing.git) to manufacture PCBs at home. It ain't much but it's honest work
 
